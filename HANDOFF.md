@@ -79,3 +79,12 @@ Ruff/mypy passed. No DB or retry files changed; rerun the same collector command
 Packaged data/top100.json loads through importlib.resources independent of working directory. Default never calls market watch; --all-shares is explicit opt-in. 314 tests passed/119 skipped, Ruff/mypy and offline wheel build passed. Wheel verified to include100 IDs. Tests cover default delivery without discovery. See docs/top100.md for list and qualifications.
 
 Verification: 96 of100 instruments passed metadata identity, current-price and five-row recent-history checks. Four timed out twice: 66416853783916493, 28431095903407567, 46752599569017089, 60350996279289099. They remain selected from the genuine ranking but are not live-qualified; the collector retries their metadata on later cycles. No prices were uploaded during these probes. Full historical completeness and continuous availability were not established.
+
+## Reliability follow-up (2026-10-25)
+
+Empty daily history now raises a recoverable source error and is not checkpointed;
+the next sweep retries while other instruments continue. Regression covers both
+explicit and default watchlists. Full suite: 316 passed, 119 skipped (legacy DB
+and opt-in live tests); mypy and ruff passed. Owner accepts paced latest collection.
+Companion API protects dated quotes against undated replacements and exposes
+history coverage; source pacing and full-history daily refresh remain unchanged.

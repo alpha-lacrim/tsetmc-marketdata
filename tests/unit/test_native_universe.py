@@ -41,7 +41,7 @@ def test_discovery_excludes_options_rights_and_secondary_lines():
 
 
 @pytest.mark.parametrize("default_watchlist", [False, True])
-@pytest.mark.parametrize("bad_history", [False, True])
+@pytest.mark.parametrize("bad_history", [False, True, "empty"])
 async def test_two_instruments_delivery_failure_isolation_and_restart(
     monkeypatch, tmp_path, bad_history, default_watchlist
 ):
@@ -64,6 +64,8 @@ async def test_two_instruments_delivery_failure_isolation_and_restart(
 
     async def history(source, code):
         calls.append(code)
+        if bad_history == "empty" and code == "123":
+            return []
         if bad_history and code == "123":
             raise SourceDataError(ErrorKind.INVALID_RECORD, "synthetic malformed history")
         return [dict(symbol=code, interval="1d", received_at=datetime.now(UTC), metadata={})]

@@ -206,6 +206,10 @@ async def run(args: argparse.Namespace) -> None:
                             if kind == "history"
                             else collect_current(source, code)
                         )
+                        if kind == "history" and not rows:
+                            raise SourceDataError(
+                                ErrorKind.NOT_FOUND, "empty history; retry next cycle"
+                            )
                         for row in rows:
                             row["metadata"].update(
                                 display_name=instrument.symbol,

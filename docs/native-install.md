@@ -136,3 +136,11 @@ not start an empty universe or loosen identity/product filters. Malformed schema
 invalid identities and access denials still fail visibly. `--once` fails immediately
 on unsuccessful discovery. The reported no-share response was not captured; a later
 bounded probe returned 3,462 rows and 745 accepted share IDs. Its cause is unconfirmed.
+
+## Empty history retries
+
+An empty daily-history response is treated as a failed attempt, not a completed
+download. The next history sweep retries it; other instruments continue. There
+is no 24-hour completion checkpoint until nonempty history is delivered.
+Latest prices remain paced per-instrument observations, not synchronous snapshots
+of all shares. Use the API event/receipt ages when showing dashboard freshness.
