@@ -22,6 +22,7 @@ from tsetmc_marketdata.simple_delivery import (
     single_instance,
     sync_directory,
 )
+from tsetmc_marketdata.simple_traffic import TrafficMeter
 from tsetmc_marketdata.utils.dates import daily_unix_seconds
 
 
@@ -154,6 +155,7 @@ async def discover(source: TSETMCClient, *, once: bool) -> list[str]:
 
 
 async def run(args: argparse.Namespace) -> None:
+    traffic = TrafficMeter(args.state_dir / "traffic.json")
     headers = (
         {"Authorization": "Bearer " + os.environ["SIMPLE_UPLOAD_TOKEN"]}
         if os.getenv("SIMPLE_UPLOAD_TOKEN")
@@ -163,11 +165,14 @@ async def run(args: argparse.Namespace) -> None:
         TSETMCClient(Settings.from_env()) as source,
         httpx.AsyncClient(timeout=60, headers=headers, trust_env=False) as http,
     ):
+        source.traffic = traffic
         source.diagnostic_dir = args.state_dir / "diagnostics"
         print(f"Validation evidence: {source.diagnostic_dir / 'validation.jsonl'}", flush=True)
         # Previously qualified durable uploads can drain even if the source is offline.
         for kind in ("history", "latest"):
-            await PendingUpload(args.api_url, args.state_dir / (kind + ".json"), http).drain()
+            await PendingUpload(
+                args.api_url, args.state_dir / (kind + ".json"), http, traffic
+            ).drain()
         codes = getattr(args, "ins_code", None)
         if not codes and getattr(args, "all_shares", False):
             codes = await discover(source, once=args.once)
@@ -208,7 +213,7 @@ async def run(args: argparse.Namespace) -> None:
             sync_directory(checkpoint.parent)
 
         async def loop(kind: str, seconds: float) -> None:
-            pending = PendingUpload(args.api_url, args.state_dir / (kind + ".json"), http)
+            pending = PendingUpload(args.api_url, args.state_dir / (kind + ".json"), http, traffic)
             recent_pass = kind == "history" and not args.once
             while True:
                 failed = 0
@@ -291,9 +296,14 @@ async def run(args: argparse.Namespace) -> None:
                 # snapshots preserve old corrections; no incremental cutoff is invented.
                 await asyncio.sleep(min(seconds, 60) if kind == "history" else seconds)
 
-        async with asyncio.TaskGroup() as group:
-            group.create_task(loop("history", args.history_seconds))
-            group.create_task(loop("latest", args.poll_seconds))
+        try:
+            async with asyncio.TaskGroup() as group:
+                group.create_task(loop("history", args.history_seconds))
+                group.create_task(loop("latest", args.poll_seconds))
+                if not args.once:
+                    group.create_task(traffic.report_loop())
+        finally:
+            traffic.report()
 
 
 def main() -> None:

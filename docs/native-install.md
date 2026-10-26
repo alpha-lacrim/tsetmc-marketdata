@@ -70,6 +70,14 @@ new observations for that stream; malformed/conflicting history is reported and
 not silently uploaded as complete. Source parsers, decimals and original timestamps
 are preserved. Last trade and official close remain distinct. History finality and
 source units are not promoted to verified status by successful delivery.
+The collector prints payload transfer totals every minute and saves cumulative byte
+counters in `<state-dir>/traffic.json`. `source_received` counts decoded TSETMC HTTP
+response bodies, including failed responses and retries. TSETMC GET requests have no
+request body, so `source_sent` is normally zero. `api_sent` counts submitted upload
+bodies, including retries, and `api_received` counts response bodies. The file survives
+restarts. These are application payload estimates, not billed network bytes: HTTP
+headers, compression, TLS, connection setup and retransmissions are excluded. A
+failed upload can send less than the submitted body counted here.
 
 HTTP is accepted, no token is required by default, and company DB credentials are
 never needed here. If the API operator sets `SIMPLE_UPLOAD_TOKEN`, set the same

@@ -18,6 +18,8 @@ from uuid import uuid4
 
 import httpx
 
+from tsetmc_marketdata.simple_traffic import TrafficMeter
+
 
 def history_batches[T](rows: list[T]) -> Iterator[list[T]]:
     """Newest batches first, chronological within each, with every row exactly once."""
@@ -84,7 +86,13 @@ def sync_directory(path: Path) -> None:
 
 
 class PendingUpload:
-    def __init__(self, endpoint: str, path: Path, client: httpx.AsyncClient):
+    def __init__(
+        self,
+        endpoint: str,
+        path: Path,
+        client: httpx.AsyncClient,
+        traffic: TrafficMeter | None = None,
+    ):
         parsed = urlsplit(endpoint)
         if (
             parsed.scheme not in {"http", "https"}
@@ -96,7 +104,12 @@ class PendingUpload:
             or parsed.path not in {"", "/"}
         ):
             raise ValueError("API URL must be an HTTP(S) origin, e.g. http://server:8000")
-        self.endpoint, self.path, self.client = endpoint.rstrip("/"), path, client
+        self.endpoint, self.path, self.client, self.traffic = (
+            endpoint.rstrip("/"),
+            path,
+            client,
+            traffic,
+        )
 
     def stage(self, observations: list[dict[str, Any]]) -> None:
         if self.path.exists():
@@ -126,9 +139,14 @@ class PendingUpload:
             raise ValueError("pending upload belongs to another API URL; preserve and review it")
         raw = saved["payload"].encode()
         batch = json.loads(raw)
+        if self.traffic:
+            # Submitted bytes include retries; a failed connection may send fewer on the wire.
+            self.traffic.add("api_sent", len(raw))
         response = await self.client.post(
             self.endpoint + "/api/ingest", content=raw, headers={"Content-Type": "application/json"}
         )
+        if self.traffic:
+            self.traffic.add("api_received", len(response.content))
         response.raise_for_status()
         try:
             receipt = response.json()

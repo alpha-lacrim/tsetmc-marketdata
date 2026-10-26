@@ -155,3 +155,17 @@ volume is reduced for the first pass. Deep history can still take hours and prev
 rows do not establish complete coverage. Full suite330passed119skipped; a regression
 checks two instruments get recent rows first, then every older row, with completion
 checkpoints only after full acknowledgements. Lint/format/mypy passed.
+
+## Local traffic visibility (2026-10-26)
+
+Native collector now saves cumulative application payload counters at
+`<state-dir>/traffic.json` and prints totals/deltas every minute. TSETMC source
+response bodies and API upload attempts/retries/response bodies are counted;
+GET request bodies are empty. Network overhead/compression and retransmissions
+are outside this estimate. Counter save failures do not stop collection. Restart
+the collector with its existing state to load the change. No API/DB migration.
+Local API was observed serving Foolad4668 daily bars and another share390 bars;
+100 TSETMC instruments had daily history and quotes at that snapshot. Ongoing
+source completeness/freshness is not established by this snapshot.
+Offline full suite 331 passed / 119 skipped; Ruff, format and mypy passed.
+Existing laptop processes predate this telemetry change and need restart.

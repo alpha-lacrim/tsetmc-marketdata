@@ -18,6 +18,7 @@ import httpx
 from tsetmc_marketdata.config import Settings
 from tsetmc_marketdata.errors import ErrorKind, SourceDataError, TransportError
 from tsetmc_marketdata.jsonio import loads_source
+from tsetmc_marketdata.simple_traffic import TrafficMeter
 
 
 @dataclass(frozen=True)
@@ -48,9 +49,14 @@ def _dns_failure(exc: BaseException) -> bool:
 
 class TSETMCClient:
     def __init__(
-        self, settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        settings: Settings | None = None,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        traffic: TrafficMeter | None = None,
     ) -> None:
         self.settings = settings or Settings()
+        self.traffic = traffic
         self.diagnostic_dir: Path | None = None
         self._client = httpx.AsyncClient(
             base_url=self.settings.base_url,
@@ -148,6 +154,8 @@ class TSETMCClient:
                 error = TransportError(kind, "HTTP transport failed", attempts=attempt)
                 error.__cause__ = exc
             else:
+                if self.traffic:
+                    self.traffic.add("source_received", len(response.content))
                 status = response.status_code
                 if 200 <= status < 300:
                     received_at = datetime.now(UTC)
