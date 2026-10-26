@@ -144,6 +144,8 @@ async def run(args: argparse.Namespace) -> None:
         TSETMCClient(Settings.from_env()) as source,
         httpx.AsyncClient(timeout=30, headers=headers, trust_env=False) as http,
     ):
+        source.diagnostic_dir = args.state_dir / "diagnostics"
+        print(f"Validation evidence: {source.diagnostic_dir / 'validation.jsonl'}", flush=True)
         # Previously qualified durable uploads can drain even if the source is offline.
         for kind in ("history", "latest"):
             await PendingUpload(args.api_url, args.state_dir / (kind + ".json"), http).drain()

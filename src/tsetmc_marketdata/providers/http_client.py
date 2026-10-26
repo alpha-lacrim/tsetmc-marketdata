@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from typing import Any, Self
 
 import httpx
@@ -50,6 +51,7 @@ class TSETMCClient:
         self, settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None
     ) -> None:
         self.settings = settings or Settings()
+        self.diagnostic_dir: Path | None = None
         self._client = httpx.AsyncClient(
             base_url=self.settings.base_url,
             timeout=httpx.Timeout(

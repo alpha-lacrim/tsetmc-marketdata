@@ -88,3 +88,19 @@ explicit and default watchlists. Full suite: 316 passed, 119 skipped (legacy DB
 and opt-in live tests); mypy and ruff passed. Owner accepts paced latest collection.
 Companion API protects dated quotes against undated replacements and exposes
 history coverage; source pacing and full-history daily refresh remain unchanged.
+
+## Validation evidence (2026-10-26)
+
+Native collector enables rotating diagnostic JSONL under state-dir/diagnostics:
+validation.jsonl plus five ~10MiB backups, one entry per flagged response. Exact
+Decimal strings, source row/index, codes/severities/reasons, insCode and source
+receive time preserved. History/current/targeted-daily/identity parser findings
+are logged; transport failures still terminal-only. No secrets/HTTP headers logged.
+No acceptance rules relaxed, no partial-history uploads enabled. Findings reflect
+our policy, not independently established source defects. See native-install.md.
+
+Read-only live captures for 13227300125161435 (2 rejected rows) and
+15521712617204216 (1 rejected row) saved in ignored
+.local/validation-review-20261026/validation.jsonl for user review. No company
+uploads or database changes performed. Unit suite318 passed119 skipped; ruff/mypy
+passed. Tests verify exact decimal evidence and preserved rejection behavior.

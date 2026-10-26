@@ -144,3 +144,31 @@ download. The next history sweep retries it; other instruments continue. There
 is no 24-hour completion checkpoint until nonempty history is delivered.
 Latest prices remain paced per-instrument observations, not synchronous snapshots
 of all shares. Use the API event/receipt ages when showing dashboard freshness.
+
+## Inspect flagged source data
+
+The native collector writes JSON Lines to
+`<state-dir>/diagnostics/validation.jsonl`, with five rotated backups (.1 through
+.5), rotating at approximately 10 MiB each (a single large entry may exceed it).
+Each line includes instrument ID, source endpoint path, receive timestamp,
+severity/code, rejection reason, and original flagged rows. Decimal values are
+stored as exact strings; dates and conflicting duplicates remain inspectable.
+History warnings/informational parser findings and current-price diagnostics are
+also logged. Schema/identity parser failures retain the decoded response payload.
+Transport failures remain in the terminal; this is not a raw HTTP traffic capture.
+These files stay local/ignored and are not included in Git or deployment ZIPs.
+Older rotated evidence eventually expires; copy files elsewhere if needed.
+
+For your laptop:
+
+```powershell
+Get-Content .local/laptop-test-tsetmc/diagnostics/validation.jsonl -Tail 5
+Get-Content .local/laptop-test-tsetmc/diagnostics/validation.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object instrument -eq '15521712617204216' |
+    ConvertTo-Json -Depth 20
+```
+
+Restart the collector to enable logging. Flagged does not prove incorrect source
+data: it means our current rule rejected it. Validation and the existing policy
+of withholding an entire history containing errors remain unchanged for review.
