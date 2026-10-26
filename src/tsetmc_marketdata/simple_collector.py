@@ -24,10 +24,23 @@ async def collect_history(
     client: TSETMCClient, ins_code: str = PILOT_INS_CODE
 ) -> list[dict[str, Any]]:
     history, response = await fetch_history(client, ins_code)
-    if history.has_errors:
+    rejected = len({d.index for d in history.diagnostics if d.severity == "error"})
+    if rejected and not history.records:
         raise SourceDataError(
             ErrorKind.INVALID_RECORD,
-            "source history contains malformed/conflicting rows; upload stopped",
+            "source history has no valid rows; flagged rows retained in diagnostics",
+        )
+    validation = dict(
+        status="partial" if rejected else "passed",
+        accepted_rows=len(history.records),
+        rejected_rows=rejected,
+        source_rows=len(history.raw_payload["closingPriceDaily"]),
+    )
+    if rejected:
+        print(
+            f"history {ins_code}: partial snapshot; {len(history.records)} valid rows, "
+            f"{rejected} rejected source rows retained in diagnostics",
+            flush=True,
         )
     return [
         dict(
@@ -49,6 +62,7 @@ async def collect_history(
             metadata={
                 "raw": r.raw,
                 "finality": "unverified",
+                "history_validation": validation,
                 "timestamp_semantics": "Gregorian trading date labeled at UTC midnight",
             },
         )
@@ -225,7 +239,13 @@ async def run(args: argparse.Namespace) -> None:
                         delivered += len(rows)
                         if kind == "history":
                             mark_completed(code)
-                        print(f"{kind} {code}: delivered {len(rows)} records", flush=True)
+                        validation = rows[0]["metadata"].get("history_validation") if rows else None
+                        suffix = (
+                            f"; partial history ({validation['rejected_rows']} rejected rows)"
+                            if validation and validation["status"] == "partial"
+                            else ""
+                        )
+                        print(f"{kind} {code}: delivered {len(rows)} records{suffix}", flush=True)
                     except TSETMCError as error:
                         if error.kind == ErrorKind.ACCESS_DENIED:
                             raise

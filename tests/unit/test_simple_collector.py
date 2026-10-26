@@ -71,7 +71,9 @@ async def test_native_history_current_and_durable_wire(
     assert sent[0] == sent[1] and not path.exists()
 
 
-async def test_conflicting_native_history_is_not_silently_uploaded(history_payload, monkeypatch):
+async def test_conflicting_date_is_quarantined_but_other_dates_upload(history_payload, monkeypatch):
+    original = len(history_payload["closingPriceDaily"])
+    conflicted_date = history_payload["closingPriceDaily"][0]["dEven"]
     history_payload["closingPriceDaily"].append(
         dict(history_payload["closingPriceDaily"][0], pClosing=Decimal("999"))
     )
@@ -80,7 +82,62 @@ async def test_conflicting_native_history_is_not_silently_uploaded(history_paylo
         return parse_history(history_payload, PILOT_INS_CODE), SimpleNamespace(received_at=None)
 
     monkeypatch.setattr(collector, "fetch_history", history)
-    with pytest.raises(SourceDataError):
+    rows = await collector.collect_history(None)
+    assert len(rows) == original - 1
+    assert all(row["metadata"]["raw"]["dEven"] != conflicted_date for row in rows)
+    assert rows[0]["metadata"]["history_validation"] == dict(
+        status="partial", accepted_rows=original - 1, rejected_rows=2, source_rows=original + 1
+    )
+
+
+async def test_one_bad_old_row_does_not_block_thousands_and_source_fix_is_reconsidered(
+    history_payload, tmp_path, capsys
+):
+    from datetime import date, timedelta
+
+    template = history_payload["closingPriceDaily"][0]
+    payload = {
+        "closingPriceDaily": [
+            dict(template, dEven=int((date(2010, 1, 1) + timedelta(days=i)).strftime("%Y%m%d")))
+            for i in range(2501)
+        ]
+    }
+    original_open = payload["closingPriceDaily"][0]["priceFirst"]
+    payload["closingPriceDaily"][0]["priceFirst"] = Decimal("999999999.123456789")
+
+    class Source:
+        diagnostic_dir = tmp_path
+
+        async def get_json(self, path):
+            return SimpleNamespace(payload=payload, received_at=datetime.now(UTC), path=path)
+
+    rows = await collector.collect_history(Source())
+    assert len(rows) == 2500
+    assert rows[0]["metadata"]["history_validation"] == dict(
+        status="partial", accepted_rows=2500, rejected_rows=1, source_rows=2501
+    )
+    assert all(row["metadata"]["raw"]["dEven"] != 20100101 for row in rows)
+    evidence = json.loads((tmp_path / "validation.jsonl").read_text(encoding="utf-8"))
+    assert evidence["diagnostics"][0]["raw"]["priceFirst"] == "999999999.123456789"
+    assert "2500 valid rows" in capsys.readouterr().out
+
+    # The next full refresh can recover a date when the provider corrects it.
+    payload["closingPriceDaily"][0]["priceFirst"] = original_open
+    repaired = await collector.collect_history(Source())
+    assert len(repaired) == 2501
+    assert repaired[0]["metadata"]["history_validation"]["status"] == "passed"
+    assert repaired[0]["metadata"]["history_validation"]["rejected_rows"] == 0
+
+
+async def test_all_invalid_history_still_fails(history_payload, monkeypatch):
+    for row in history_payload["closingPriceDaily"]:
+        row["priceFirst"] = Decimal("999999999")
+
+    async def history(*args):
+        return parse_history(history_payload, PILOT_INS_CODE), SimpleNamespace(received_at=None)
+
+    monkeypatch.setattr(collector, "fetch_history", history)
+    with pytest.raises(SourceDataError, match="no valid rows"):
         await collector.collect_history(None)
 
 

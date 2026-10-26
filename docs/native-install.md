@@ -45,8 +45,10 @@ uv run tsetmc-simple --ins-code 46348559193224090 --ins-code 41379697187196382
 ```
 
 Full history refreshes per instrument every 86,400 seconds by default, preserving
-old corrections. `history-completed.json` records success only after all batches
-are acknowledged, so a restart does not redownload completed histories. Never delete
+old corrections. `history-completed.json` records upload completion only after all
+accepted batches are acknowledged; this does not certify complete source history.
+Partial snapshots follow the same daily refresh schedule, so corrected source rows
+are reconsidered on the next refresh. A restart does not redownload acknowledged snapshots. Never delete
 pending files. Retain the checkpoint with the same company database; after an intentional
 company database reset, archive the state directory and start a new one. The checkpoint
 is bound to the API URL but cannot detect a database reset behind that same URL.
@@ -55,7 +57,9 @@ instrument as failure after attempting the remaining instruments in that stream.
 Use `--history-seconds 3600` for hourly full history if that source load is acceptable.
 Metadata names are sent to the company API. Source IDs remain the storage keys.
 
-Malformed data skips that instrument for the current cycle, with a visible error;
+Malformed historical rows and conflicting duplicate dates are excluded while valid
+rows continue uploading with explicit partial-history metadata. A wholly malformed
+response, no valid rows, or invalid instrument identity still fails that instrument;
 other instruments continue. Access denials and permanent upload failures still stop.
 No source price is derived from the abbreviated bulk market-watch fields: the observed
 bulk response lacks a usable date and contains zero-valued placeholder price fields.
@@ -170,5 +174,32 @@ Get-Content .local/laptop-test-tsetmc/diagnostics/validation.jsonl |
 ```
 
 Restart the collector to enable logging. Flagged does not prove incorrect source
-data: it means our current rule rejected it. Validation and the existing policy
-of withholding an entire history containing errors remain unchanged for review.
+data: it means our current rule rejected it. Validation rules remain unchanged. Native history delivery now uploads valid rows
+while retaining flagged rows in these logs; conflicting duplicate dates are omitted.
+Current-price, identity and response-schema errors still fail their observation.
+
+
+## Partial history delivery
+
+Every daily observation includes `metadata.history_validation`:
+
+```json
+{"status":"partial","accepted_rows":2500,"rejected_rows":1,"source_rows":2501}
+```
+
+`rejected_rows` counts distinct source row indexes flagged as errors, not missing
+trading dates. Conflicting duplicates can count multiple rows for one omitted date.
+Identical duplicates are deduplicated without making the snapshot partial. A
+`passed` snapshot means all rows passed our rules; it is not proof of complete
+provider history, finalized prices or complete exchange-session coverage.
+Inspect this metadata through `/api/records`. Chart JSON remains unchanged.
+Console output identifies partial snapshots before collection upload and after
+acknowledgement. The raw flagged rows/reasons remain in rotating diagnostic files;
+copy them elsewhere for retention beyond rotation. No invalid prices are fabricated
+or repaired. Previously stored observations are not deleted if a later source
+snapshot flags that date. Legacy export/DB pipeline policies are unchanged.
+
+Restart the native collector with the same state directory to load this change.
+Previously failed histories have no successful upload checkpoint and are retried;
+previously acknowledged snapshots refresh normally. `--once` forces a full pass.
+No API/server upgrade or database migration is required for this metadata addition.

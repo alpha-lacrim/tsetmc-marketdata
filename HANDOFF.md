@@ -96,7 +96,7 @@ validation.jsonl plus five ~10MiB backups, one entry per flagged response. Exact
 Decimal strings, source row/index, codes/severities/reasons, insCode and source
 receive time preserved. History/current/targeted-daily/identity parser findings
 are logged; transport failures still terminal-only. No secrets/HTTP headers logged.
-No acceptance rules relaxed, no partial-history uploads enabled. Findings reflect
+No acceptance rules relaxed; native partial-history delivery is now enabled (see below). Findings reflect
 our policy, not independently established source defects. See native-install.md.
 
 Read-only live captures for 13227300125161435 (2 rejected rows) and
@@ -104,3 +104,26 @@ Read-only live captures for 13227300125161435 (2 rejected rows) and
 .local/validation-review-20261026/validation.jsonl for user review. No company
 uploads or database changes performed. Unit suite318 passed119 skipped; ruff/mypy
 passed. Tests verify exact decimal evidence and preserved rejection behavior.
+
+
+## Native partial history fix
+
+Verified whole-history rejection came from simple_collector.collect_history's
+has_errors guard after the parser had already separated valid and rejected rows.
+Native mode now sends only parsed valid rows, excludes conflicting dates and logs
+partial delivery. All-invalid, malformed-envelope and identity failures still fail.
+Each row carries metadata.history_validation (status passed/partial, accepted_rows,
+rejected_rows by source index, source_rows). Validation rules and exact values stay.
+Raw flagged rows remain in existing rotating local diagnostic logs. No new DB or
+schema, no legacy CLI/DB policy changes. /api/records exposes the metadata; the
+chart body stays unchanged. Upload checkpoint means receipt completion, not complete
+market coverage. Partial snapshots refresh on the same daily schedule; source fixes
+can restore excluded dates on a later full fetch. Prior stored dates are not deleted.
+
+Regression tests: one bad old row allows2500 valid rows; conflicting duplicate date
+excluded; all-invalid histories fail; a source correction restores the old date.
+Full suite322 passed119 skipped; ruff/format/mypy passed. Bounded live read-only
+proof: 15521712617204216 yielded5718 accepted rows and1 rejected source row; every
+accepted row passed company API Batch validation. Captures under ignored
+.local/partial-history-proof/. Local API was offline during the check, so this is
+not a live company upload/storage qualification. Restart collector to activate.

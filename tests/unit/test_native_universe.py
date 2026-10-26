@@ -41,7 +41,7 @@ def test_discovery_excludes_options_rights_and_secondary_lines():
 
 
 @pytest.mark.parametrize("default_watchlist", [False, True])
-@pytest.mark.parametrize("bad_history", [False, True, "empty"])
+@pytest.mark.parametrize("bad_history", [False, True, "empty", "partial"])
 async def test_two_instruments_delivery_failure_isolation_and_restart(
     monkeypatch, tmp_path, bad_history, default_watchlist
 ):
@@ -66,9 +66,12 @@ async def test_two_instruments_delivery_failure_isolation_and_restart(
         calls.append(code)
         if bad_history == "empty" and code == "123":
             return []
-        if bad_history and code == "123":
+        if bad_history is True and code == "123":
             raise SourceDataError(ErrorKind.INVALID_RECORD, "synthetic malformed history")
-        return [dict(symbol=code, interval="1d", received_at=datetime.now(UTC), metadata={})]
+        metadata = {}
+        if bad_history == "partial" and code == "123":
+            metadata["history_validation"] = dict(status="partial", rejected_rows=1)
+        return [dict(symbol=code, interval="1d", received_at=datetime.now(UTC), metadata=metadata)]
 
     async def current(source, code):
         return [dict(symbol=code, interval="quote", received_at=datetime.now(UTC), metadata={})]
@@ -110,7 +113,8 @@ async def test_two_instruments_delivery_failure_isolation_and_restart(
         pytest.fail("fixed watchlist must not call market watch")
 
     monkeypatch.setattr(collector, "discover_shares", forbidden_discovery)
-    if bad_history:
+    failed = bad_history is True or bad_history == "empty"
+    if failed:
         with pytest.raises(ExceptionGroup):
             await collector.run(args)
     else:
@@ -119,9 +123,12 @@ async def test_two_instruments_delivery_failure_isolation_and_restart(
     assert any(r["symbol"] == "456" and r["interval"] == "1d" for r in uploads)
     assert all(r["metadata"]["display_name"] == "synthetic " + r["symbol"] for r in uploads)
     saved = json.loads((tmp_path / "history-completed.json").read_text())
-    assert set(saved["completed"]) == ({"456"} if bad_history else {"123", "456"})
+    assert set(saved["completed"]) == ({"456"} if failed else {"123", "456"})
     assert not (tmp_path / "history.json").exists()
-    if not bad_history:
+    if bad_history == "partial":
+        uploaded = next(r for r in uploads if r["symbol"] == "123" and r["interval"] == "1d")
+        assert uploaded["metadata"]["history_validation"]["status"] == "partial"
+    if not failed:
         calls.clear()
         args.once = False
 
