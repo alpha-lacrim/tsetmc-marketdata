@@ -6,6 +6,21 @@ optional upload token are authorized. Read docs/native-install.md and the compan
 company docs/native-dashboard.md. Original Foolad pilot, old DB/outbox pipeline,
 migrations, archives and frozen releases are unchanged. Legacy CLI pilot fences stay.
 
+## Intraday feasibility research (2026-10-26)
+
+Read `docs/intraday-research-2026-10-26.md` before implementing subdaily history.
+Official site JS and paced live probes confirm full dated trades via
+`Trade/GetTradeHistory/{insCode}/{date}/false`. Six instrument/date samples
+reconciled active trade count/volume/value and trade OHLC exactly to daily records;
+1m/5m/15m buckets were derived in an ignored research script. Cancelled rows must
+be excluded before sequence deduplication. A sampled 2021 day worked, while a
+2007 trading day returned no intraday rows. The `true` variant returned only a
+subset; compact/chart endpoints have unresolved interval/timestamp behavior.
+Research only: production collector remains daily/latest. Implementation needs
+explicit source-date handling, correction/removal semantics, bounded scheduling,
+API/storage validation and tests. Raw captures/scripts stay in ignored
+`.local/intraday-research-20261026/`. No runtime/API/DB changes or deployment.
+
 ## Current instrument scope
 
 Owner authorized a fixed top100 default after repeated empty market-watch responses.
