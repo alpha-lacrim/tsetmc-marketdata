@@ -203,3 +203,28 @@ Restart the native collector with the same state directory to load this change.
 Previously failed histories have no successful upload checkpoint and are retried;
 previously acknowledged snapshots refresh normally. `--once` forces a full pass.
 No API/server upgrade or database migration is required for this metadata addition.
+
+
+## Remote upload pacing
+
+History uploads now contain at most100 records, newest batches first (rows within
+a batch stay chronological); the upload timeout is60seconds. Older history still
+uploads afterward. Existing pending batches are retried unchanged before collecting
+new ones. No state reset, server update or database migration is needed. Preserve
+.local/company-tsetmc and restart the collector to load the new behavior.
+Company history can remain incomplete during initial fill: start=0 shows all stored
+dates while the default chart range shows only the last30days. This is separate
+from partial-history validation status. Diagnostic/source validation rules remain.
+
+
+Recent-first startup: normal continuous collection uploads up to100 newest valid
+daily rows for each unfinished instrument before deep history. Preview rows have
+history_delivery.scope=recent_preview, snapshot_rows, uploaded_rows and
+full_upload_pending=true. This does not set the completion checkpoint; a subsequent
+full accepted upload does. --once bypasses the preview and remains a full pass.
+Existing pending files drain before this preview without modification. Initial
+source requests still fetch full daily snapshots for parsing/validation; upload
+volume is reduced for the first pass. Deep history can still take hours and preview
+rows do not establish complete coverage. Full suite330passed119skipped; a regression
+checks two instruments get recent rows first, then every older row, with completion
+checkpoints only after full acknowledgements. Lint/format/mypy passed.

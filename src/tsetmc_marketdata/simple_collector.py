@@ -16,7 +16,12 @@ from tsetmc_marketdata.providers.closing_prices import fetch_current, fetch_hist
 from tsetmc_marketdata.providers.http_client import TSETMCClient
 from tsetmc_marketdata.providers.instruments import fetch_instrument
 from tsetmc_marketdata.providers.universe import discover_shares, top_share_codes
-from tsetmc_marketdata.simple_delivery import PendingUpload, single_instance, sync_directory
+from tsetmc_marketdata.simple_delivery import (
+    PendingUpload,
+    history_batches,
+    single_instance,
+    sync_directory,
+)
 from tsetmc_marketdata.utils.dates import daily_unix_seconds
 
 
@@ -156,7 +161,7 @@ async def run(args: argparse.Namespace) -> None:
     )
     async with (
         TSETMCClient(Settings.from_env()) as source,
-        httpx.AsyncClient(timeout=30, headers=headers, trust_env=False) as http,
+        httpx.AsyncClient(timeout=60, headers=headers, trust_env=False) as http,
     ):
         source.diagnostic_dir = args.state_dir / "diagnostics"
         print(f"Validation evidence: {source.diagnostic_dir / 'validation.jsonl'}", flush=True)
@@ -204,6 +209,7 @@ async def run(args: argparse.Namespace) -> None:
 
         async def loop(kind: str, seconds: float) -> None:
             pending = PendingUpload(args.api_url, args.state_dir / (kind + ".json"), http)
+            recent_pass = kind == "history" and not args.once
             while True:
                 failed = 0
                 delivered = 0
@@ -226,6 +232,16 @@ async def run(args: argparse.Namespace) -> None:
                             raise SourceDataError(
                                 ErrorKind.NOT_FOUND, "empty history; retry next cycle"
                             )
+                        if recent_pass:
+                            snapshot_rows = len(rows)
+                            rows = rows[-100:]
+                            for row in rows:
+                                row["metadata"]["history_delivery"] = dict(
+                                    scope="recent_preview",
+                                    snapshot_rows=snapshot_rows,
+                                    uploaded_rows=len(rows),
+                                    full_upload_pending=True,
+                                )
                         for row in rows:
                             row["metadata"].update(
                                 display_name=instrument.symbol,
@@ -233,11 +249,14 @@ async def run(args: argparse.Namespace) -> None:
                                 instrument_id=instrument.instrument_id,
                                 isin=instrument.isin,
                             )
-                        for offset in range(0, len(rows), 500):
-                            pending.stage(rows[offset : offset + 500])
+                        chunks = history_batches(rows) if kind == "history" else [rows]
+                        for chunk in chunks:
+                            if not chunk:
+                                continue
+                            pending.stage(chunk)
                             await pending.drain()
                         delivered += len(rows)
-                        if kind == "history":
+                        if kind == "history" and not recent_pass:
                             mark_completed(code)
                         validation = rows[0]["metadata"].get("history_validation") if rows else None
                         suffix = (
@@ -245,6 +264,8 @@ async def run(args: argparse.Namespace) -> None:
                             if validation and validation["status"] == "partial"
                             else ""
                         )
+                        if recent_pass:
+                            suffix += "; recent preview, full history pending"
                         print(f"{kind} {code}: delivered {len(rows)} records{suffix}", flush=True)
                     except TSETMCError as error:
                         if error.kind == ErrorKind.ACCESS_DENIED:
@@ -265,6 +286,7 @@ async def run(args: argparse.Namespace) -> None:
                             ErrorKind.INVALID_RECORD, f"{kind}: {failed} instruments failed"
                         )
                     return
+                recent_pass = False
                 # History scheduling is per instrument and survives a restart. Full
                 # snapshots preserve old corrections; no incremental cutoff is invented.
                 await asyncio.sleep(min(seconds, 60) if kind == "history" else seconds)

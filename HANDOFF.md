@@ -127,3 +127,31 @@ proof: 15521712617204216 yielded5718 accepted rows and1 rejected source row; eve
 accepted row passed company API Batch validation. Captures under ignored
 .local/partial-history-proof/. Local API was offline during the check, so this is
 not a live company upload/storage qualification. Restart collector to activate.
+
+
+## Slow company history uploads
+
+Company API update verified; both active collectors targeted the right remote URL.
+Latest prices reached100 instruments but history only8 per market at initial check.
+TSETMC pending500rows (~551KB) took28.73s to acknowledge on the observed path;
+100rows (~106KB) took3.41s. Both receipts matched. Old30s timeout was marginal;
+network/server allocation of delay remains unknown (no company shell access).
+Native history now uploads newest100row batches first and uses60s HTTP timeout.
+Ascending order within a batch, no row omission, pending bytes and receipt checks
+preserved. Corrected rows/daily refresh unchanged. No DB/API changes required.
+Restart the existing company collector state directory; never delete pending files.
+Full suite329passed119skipped, lint/format/mypy passed. Legacy PG/live opt-in suites
+remain skipped. No sustained company full-universe qualification claimed.
+
+
+Recent-first startup: normal continuous collection uploads up to100 newest valid
+daily rows for each unfinished instrument before deep history. Preview rows have
+history_delivery.scope=recent_preview, snapshot_rows, uploaded_rows and
+full_upload_pending=true. This does not set the completion checkpoint; a subsequent
+full accepted upload does. --once bypasses the preview and remains a full pass.
+Existing pending files drain before this preview without modification. Initial
+source requests still fetch full daily snapshots for parsing/validation; upload
+volume is reduced for the first pass. Deep history can still take hours and preview
+rows do not establish complete coverage. Full suite330passed119skipped; a regression
+checks two instruments get recent rows first, then every older row, with completion
+checkpoints only after full acknowledgements. Lint/format/mypy passed.

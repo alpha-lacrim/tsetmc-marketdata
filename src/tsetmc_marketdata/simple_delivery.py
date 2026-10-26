@@ -19,6 +19,12 @@ from uuid import uuid4
 import httpx
 
 
+def history_batches[T](rows: list[T]) -> Iterator[list[T]]:
+    """Newest batches first, chronological within each, with every row exactly once."""
+    for end in range(len(rows), 0, -100):
+        yield rows[max(0, end - 100) : end]
+
+
 def retry_delay(value: str | None, minimum: float) -> float:
     """Honor Retry-After seconds or HTTP dates, never retry sooner than requested."""
     if not value:
