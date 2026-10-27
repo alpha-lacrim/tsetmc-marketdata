@@ -1,4 +1,4 @@
-# Current state - native share expansion, 2026-10-22
+# Current state - four shares and intraday, 2026-10-27
 
 Default tsetmc-simple sends daily history and current observations directly to one
 company FastAPI/PostgreSQL. No source DB or Docker required. HTTP/open access and
@@ -6,22 +6,40 @@ optional upload token are authorized. Read docs/native-install.md and the compan
 company docs/native-dashboard.md. Original Foolad pilot, old DB/outbox pipeline,
 migrations, archives and frozen releases are unchanged. Legacy CLI pilot fences stay.
 
-## Intraday feasibility research (2026-10-26)
+## Implemented intraday and temporary four-share cap
 
-Read `docs/intraday-research-2026-10-26.md` before implementing subdaily history.
-Official site JS and paced live probes confirm full dated trades via
-`Trade/GetTradeHistory/{insCode}/{date}/false`. Six instrument/date samples
-reconciled active trade count/volume/value and trade OHLC exactly to daily records;
-1m/5m/15m buckets were derived in an ignored research script. Cancelled rows must
-be excluded before sequence deduplication. A sampled 2021 day worked, while a
-2007 trading day returned no intraday rows. The `true` variant returned only a
-subset; compact/chart endpoints have unresolved interval/timestamp behavior.
-Research only: production collector remains daily/latest. Implementation needs
-explicit source-date handling, correction/removal semantics, bounded scheduling,
-API/storage validation and tests. Raw captures/scripts stay in ignored
-`.local/intraday-research-20261026/`. No runtime/API/DB changes or deployment.
+Every native watchlist is capped at four. Default shares are Foolad, Vamaaden,
+Vabemellat and Tasiko (first four packaged IDs). Old data/larger manifest remain.
+providers/intraday.py builds exact 1m OHLC/count/volume/value from GetTrade/current
+and GetTradeHistory/{code}/{date}/false. It filters cancellations, collapses only
+identical duplicate rows, rejects conflicts, checks HHMMSS/identity/financial values
+and binds source dates with Asia/Tehran. Completed days must reconcile count/volume/
+value and trade OHLC to daily summaries. Missing archives do not become empty days.
+Current summary races produce explicitly provisional upsert-only minute snapshots;
+reconciled snapshots may also remove candles after cancellations.
 
-## Current instrument scope
+Default independent intraday stream: current session plus five completed dates,
+300s pause after sweeps, hourly completed-day refresh. --intraday-days0 disables;
+1..30 controls recovery. Bounded backfill replays on restart. Pending intraday.json
+uses exact receipts; older pending files drain unchanged. Source failures isolate
+dates/instruments; --once exits with failure if any snapshot failed. Continuous
+mode retries. Diagnostic raw evidence and payload traffic counters remain local.
+
+Update company API first and run marketdata-simple init on its EXISTING native DB
+before restart, to add snapshot watermarks. API stores minutes, aggregates5m/15m,
+keeps daily official close, audits tombstones and rejects stale resurrection.
+See docs/intraday.md and companion docs/native-intraday.md. Older API returns422.
+
+Verification: full suite346 passed119 skipped; Ruff/format/mypy and build passed.
+Company full596 passed365 skipped, latest targeted56 passed with isolated PG17.
+Live real-collector flow populated all four shares' daily/latest and1m/5m/15m API
+charts (320..421 minute records each). Some source502s/empty archives prevented a
+fully successful one-shot backfill, so no full-coverage claim. Current summaries
+can move between requests. User/company DBs and running processes unchanged.
+Evidence stays ignored under companion .local/intraday-flow-20261027/ and local
+.local/intraday-research-20261026/. Source feasibility report remains dated evidence.
+
+## Earlier expansion context (superseded by the four-share cap above)
 
 Owner authorized a fixed top100 default after repeated empty market-watch responses.
 Default startup loads packaged data/top100.json without discovery. --all-shares opts

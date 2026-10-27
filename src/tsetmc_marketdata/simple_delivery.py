@@ -111,11 +111,16 @@ class PendingUpload:
             traffic,
         )
 
-    def stage(self, observations: list[dict[str, Any]]) -> None:
+    def stage(
+        self, observations: list[dict[str, Any]], *, snapshot: dict[str, Any] | None = None
+    ) -> None:
         if self.path.exists():
             raise RuntimeError("flush pending upload before collecting another batch")
+        batch: dict[str, Any] = {"batch_id": str(uuid4()), "observations": observations}
+        if snapshot is not None:
+            batch["snapshot"] = snapshot
         raw = json.dumps(
-            {"batch_id": str(uuid4()), "observations": observations},
+            batch,
             default=json_value,
             allow_nan=False,
             separators=(",", ":"),

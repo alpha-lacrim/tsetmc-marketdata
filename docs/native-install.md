@@ -1,7 +1,7 @@
 # Native collector installation (no Docker or source database)
 
-This is the default path for new installations. The collector sends available daily
-history and latest observations directly to the shared company FastAPI service.
+This is the default path for new installations. The collector sends daily history,
+latest observations and trade-derived minute candles to the shared company FastAPI service.
 It keeps a small durable retry file instead of a local PostgreSQL database.
 
 First install the company API using the companion repository's
@@ -21,7 +21,11 @@ export COMPANY_API_URL='http://SERVER:8000'
 uv run --no-sync tsetmc-simple
 ```
 
-The default loads a **fixed top-100 watchlist bundled with the installed package**.
+The default loads the **first four shares from the packaged watchlist**:
+فولاد, ومعادن, وبملت, تاصیکو. Every native selection, including explicit lists and
+`--all-shares`, is temporarily capped at four. Older stored data remains readable.
+**Update the company API first and run `marketdata-simple init` with its existing
+native database URL**, then restart API and collectors. See [intraday operation](intraday.md).
 It does not call market watch during startup, so an empty market-watch response
 cannot block normal collection. The selection uses reported traded value for primary
 ordinary shares in a captured TSETMC snapshot, with Foolad included. It is a dated
@@ -32,11 +36,11 @@ Run `uv run tsetmc-simple --state-dir .local/laptop-test-tsetmc` on the existing
 laptop. Stop the previous copy first. **Remove `--all-shares` from the old command.**
 Keep the same state directory and company database. Explicit `--ins-code` values
 still select a smaller watchlist. `--all-shares` is optional live discovery of the
-broader primary-share universe; its empty-response retry behavior remains available.
+primary-share universe, still capped at four; empty-response retry remains available.
 
 Requests share one paced HTTP client (one request start per second by default).
-Latest-price sweeps run sequentially, followed by a 15-second pause. With 100
-instruments a sweep takes at least about 100 seconds and usually longer, longer during initial qualification/backfill
+Latest-price sweeps run sequentially, followed by a 15-second pause. Four instruments
+need at least four paced requests, usually longer during initial qualification/backfill
 or source failures; `--poll-seconds 15` does NOT mean every share updates in 15 seconds.
 For a faster small watchlist, repeat `--ins-code`:
 
@@ -99,7 +103,8 @@ GET /api/latest?market=tsetmc&symbol=46348559193224090
 Chart output is the supplied Go contract: a=time, b=open, c=official close,
 d=high, e=low, f=count, g=volume, h=traded value, i=null. Unknown activity is a
 zero placeholder only in that response. Exact records and nulls remain stored.
-TSETMC does not supply native minute history in this collector.
+Intraday minutes are derived from actual trades; the API also aggregates 5m/15m.
+For those intervals `c` is last trade, not official close. See [intraday operation](intraday.md).
 
 Existing PostgreSQL collection/outbox/delivery commands remain available for old
 installations. Their databases and the original pilot are preserved; the new API

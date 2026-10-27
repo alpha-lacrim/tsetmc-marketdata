@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from tsetmc_marketdata.errors import ErrorKind, SourceDataError, TSETMCError
 from tsetmc_marketdata.providers.closing_prices import fetch_current, fetch_history
 from tsetmc_marketdata.providers.http_client import TSETMCClient
 from tsetmc_marketdata.providers.instruments import fetch_instrument
+from tsetmc_marketdata.providers.intraday import TEHRAN, fetch_intraday
 from tsetmc_marketdata.providers.universe import discover_shares, top_share_codes
 from tsetmc_marketdata.simple_delivery import (
     PendingUpload,
@@ -169,7 +170,7 @@ async def run(args: argparse.Namespace) -> None:
         source.diagnostic_dir = args.state_dir / "diagnostics"
         print(f"Validation evidence: {source.diagnostic_dir / 'validation.jsonl'}", flush=True)
         # Previously qualified durable uploads can drain even if the source is offline.
-        for kind in ("history", "latest"):
+        for kind in ("history", "latest", "intraday"):
             await PendingUpload(
                 args.api_url, args.state_dir / (kind + ".json"), http, traffic
             ).drain()
@@ -180,6 +181,7 @@ async def run(args: argparse.Namespace) -> None:
         if PILOT_INS_CODE in codes:
             codes.remove(PILOT_INS_CODE)
             codes.insert(0, PILOT_INS_CODE)
+        codes = codes[:4]
         print(f"Collecting {len(codes)} instruments; requests share source pacing", flush=True)
         instruments: dict[str, Any] = {}
         identity_lock = asyncio.Lock()
@@ -296,10 +298,89 @@ async def run(args: argparse.Namespace) -> None:
                 # snapshots preserve old corrections; no incremental cutoff is invented.
                 await asyncio.sleep(min(seconds, 60) if kind == "history" else seconds)
 
+        async def intraday_loop() -> None:
+            pending = PendingUpload(args.api_url, args.state_dir / "intraday.json", http, traffic)
+            # Bounded five-day recovery is replay-safe on restart; only acknowledgements
+            # advance the in-memory refresh timer. Current prices/daily history stay independent.
+            refreshed: dict[tuple[str, date], datetime] = {}
+            calendars: dict[str, tuple[datetime, list[date]]] = {}
+            while True:
+                failures = 0
+                for depth in range(args.intraday_days + 1):
+                    for code in codes:
+                        await pending.drain()
+                        try:
+                            instrument = await identify(code)
+                            day = None
+                            now = datetime.now(UTC)
+                            if depth:
+                                if (
+                                    code not in calendars
+                                    or (now - calendars[code][0]).total_seconds() >= 3600
+                                ):
+                                    history, _ = await fetch_history(source, code)
+                                    days = sorted(
+                                        {
+                                            r.trading_date
+                                            for r in history.records
+                                            if r.trading_date < now.astimezone(TEHRAN).date()
+                                        },
+                                        reverse=True,
+                                    )
+                                    calendars[code] = now, days[: args.intraday_days]
+                                days = calendars[code][1]
+                                if depth > len(days):
+                                    continue
+                                day = days[depth - 1]
+                                if (code, day) in refreshed and (
+                                    now - refreshed[code, day]
+                                ).total_seconds() < 3600:
+                                    continue
+                            rows, snapshot = await fetch_intraday(source, code, day)
+                            for row in rows:
+                                row["metadata"].update(
+                                    display_name=instrument.symbol,
+                                    company_name=instrument.company_name,
+                                    instrument_id=instrument.instrument_id,
+                                    isin=instrument.isin,
+                                )
+                            # One atomic day replacement; chunks would erase each other's bars.
+                            pending.stage(rows, snapshot=snapshot)
+                            await pending.drain()
+                            if day is not None:
+                                refreshed[code, day] = datetime.now(UTC)
+                            quality = (
+                                "reconciled"
+                                if snapshot["reconciled"]
+                                else "provisional; summary still changing"
+                            )
+                            print(
+                                f"intraday {code} {snapshot['trading_date']}: "
+                                f"delivered {len(rows)} minute candles ({quality})",
+                                flush=True,
+                            )
+                        except TSETMCError as error:
+                            if error.kind == ErrorKind.ACCESS_DENIED:
+                                raise
+                            failures += 1
+                            print(
+                                f"intraday {code}: {error.kind.value}: {error}; retry next cycle",
+                                flush=True,
+                            )
+                if args.once:
+                    if failures:
+                        raise SourceDataError(
+                            ErrorKind.INVALID_RECORD, f"intraday: {failures} snapshots failed"
+                        )
+                    return
+                await asyncio.sleep(args.intraday_seconds)
+
         try:
             async with asyncio.TaskGroup() as group:
                 group.create_task(loop("history", args.history_seconds))
                 group.create_task(loop("latest", args.poll_seconds))
+                if getattr(args, "intraday_days", 0):
+                    group.create_task(intraday_loop())
                 if not args.once:
                     group.create_task(traffic.report_loop())
         finally:
@@ -313,6 +394,18 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=15)
     parser.add_argument("--history-seconds", type=float, default=86400)
     parser.add_argument(
+        "--intraday-days",
+        type=int,
+        default=5,
+        help="recent completed trading days to recover (0 disables intraday; default 5)",
+    )
+    parser.add_argument(
+        "--intraday-seconds",
+        type=float,
+        default=300,
+        help="pause between intraday sweeps; completed days refresh hourly",
+    )
+    parser.add_argument(
         "--ins-code",
         action="append",
         type=validate_ins_code,
@@ -321,12 +414,14 @@ def main() -> None:
     parser.add_argument(
         "--all-shares",
         action="store_true",
-        help="opt in to live discovery instead of the fixed top100 watchlist",
+        help="discover shares instead of the packaged watchlist (temporary cap remains 4)",
     )
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if args.all_shares and args.ins_code:
         parser.error("choose --all-shares or explicit --ins-code values")
+    if not 0 <= args.intraday_days <= 30 or not 60 <= args.intraday_seconds <= 86400:
+        parser.error("intraday-days must be 0..30; intraday-seconds must be 60..86400")
     if not 5 <= args.poll_seconds <= 86400 or not 60 <= args.history_seconds <= 86400:
         parser.error("poll-seconds must be 5..86400; history-seconds must be 60..86400")
     with single_instance(args.state_dir):
